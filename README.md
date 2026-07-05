@@ -1,4 +1,4 @@
-# Investment Portfolio Analytics Platform & Data Engineering Showcase
+# Investment Portfolio Analytics Platform
 
 A high-fidelity financial analytics dashboard and robust ETL pipeline orchestrator built in Python, SQL, and Streamlit. This project is a dedicated showcase of **Data Engineering** expertise, featuring data integration from multiple mock APIs, automated data validation checks, structured star-schema analytical database modeling (dbt simulator in SQLite), and real-time pipeline visualizers alongside quantitative finance risk calculations.
 
@@ -11,9 +11,9 @@ A high-fidelity financial analytics dashboard and robust ETL pipeline orchestrat
    - Core risk modeling metrics (Parametric & Historical Value at Risk (VaR), Maximum Drawdown, Sharpe Ratio, Sortino Ratio).
    - Interactive charts: Cumulative Returns Growth, Asset Allocation Weights, Drawdown Curve, and Returns Distribution.
 2. **Automated ETL Ingestion & Pipeline Orchestrator**:
-   - Simulated daily ingestion from 5 distinct sources (Yahoo Finance, Alpha Vantage, CoinGecko, SEC EDGAR, and local files).
+   - Ingestion from 5 sources (Yahoo Finance, Alpha Vantage, CoinGecko, SEC EDGAR, and local files).
    - Custom **Data Quality Layer** executing null checks, positive value assertions, and outlier price scrubbing (e.g., catching fat-finger price spikes).
-   - Interactive Airflow-style DAG visualizer animating task execution states (Pending ➔ Running ➔ Success).
+   - Interactive DAG visualizer animating task execution states (Pending ➔ Running ➔ Success).
    - Detailed Data Quality Report Card logging and cleaning raw data errors before analytical load.
 3. **Star Schema Data Warehouse Explorer**:
    - Star Schema dimensional layout separating fact tables (transactions, daily prices, portfolio holdings) and dimension tables (assets, portfolios, dates, providers).
@@ -21,8 +21,7 @@ A high-fidelity financial analytics dashboard and robust ETL pipeline orchestrat
    - Interactive database tables preview.
 4. **Analytical SQL Workbench Sandbox**:
    - Live text editor to execute arbitrary SQL queries (joins, window functions, CTEs) directly against the database.
-   - Dynamic auto-visualization: Chart query results (Bar, Line, Area, Scatter) instantly.
-   - Built-in SQL templates for portfolio value snapshots, sector weight calculations, and provider reliability audits.
+   - Dynamic auto-visualization: Chart query results (Bar, Line, Area) instantly.
 
 ---
 

@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import scipy.stats as stats
 from schema_definitions import get_connection, init_database
-from data_generator import generate_mock_financial_data, TICKERS, generate_mock_sec_filings, SEC_SECTOR_COMPANIES
+from data_generator import generate_mock_financial_data, TICKERS
 
 def create_run_id():
     return str(uuid.uuid4())[:8]
@@ -58,7 +58,6 @@ def run_etl_pipeline_generator(run_id=None):
         yield "Step 2/5: Ingesting raw files and API feeds from 5 providers...", 0.30
         log_msg("Ingesting raw data from 5 sources...")
         df_assets, df_prices, df_transactions = generate_mock_financial_data()
-        df_sec = generate_mock_sec_filings()
         
         conn = get_connection()
         # Truncate staging tables to simulate fresh ingestion load
@@ -66,16 +65,14 @@ def run_etl_pipeline_generator(run_id=None):
         cursor.execute("DELETE FROM stg_raw_assets;")
         cursor.execute("DELETE FROM stg_raw_prices;")
         cursor.execute("DELETE FROM stg_raw_transactions;")
-        cursor.execute("DELETE FROM stg_raw_sec_filings;")
         conn.commit()
         
         # Load staging
         df_assets.to_sql('stg_raw_assets', conn, if_exists='append', index=False)
         df_prices.to_sql('stg_raw_prices', conn, if_exists='append', index=False)
         df_transactions.to_sql('stg_raw_transactions', conn, if_exists='append', index=False)
-        df_sec.to_sql('stg_raw_sec_filings', conn, if_exists='append', index=False)
         
-        log_msg(f"Ingested {len(df_assets)} assets, {len(df_prices)} price records, {len(df_transactions)} transactions, and {len(df_sec)} SEC filing records into staging.")
+        log_msg(f"Ingested {len(df_assets)} assets, {len(df_prices)} price records, and {len(df_transactions)} transactions into staging.")
 
         # Step 3: Data Quality & Valdiation (Great Expectations style)
         yield "Step 3/5: Executing data validation and schema profiling checks...", 0.50
@@ -136,55 +133,6 @@ def run_etl_pipeline_generator(run_id=None):
         if inv_price_count > 0:
             log_msg(f"WARNING: Data quality price_null_check failed: {inv_price_count} rows found.")
 
-        # ==========================================
-        # SEC FILINGS DATA QUALITY VALIDATIONS
-        # ==========================================
-        log_msg("Running corporate financial report validation checks...")
-        
-        # Pivot the filings data to simplify accounting checks per period
-        df_sec_pivot = df_sec.pivot_table(
-            index=['ticker', 'fiscal_year', 'fiscal_quarter'], 
-            columns='line_item', 
-            values='value'
-        ).reset_index()
-
-        # Validation SEC-A: Balance Sheet Check (Assets = Liabilities + Equity)
-        unbalanced_bs = df_sec_pivot[np.abs(df_sec_pivot['TotalAssets'] - (df_sec_pivot['TotalLiabilities'] + df_sec_pivot['TotalEquity'])) >= 1.0]
-        unbalanced_count = len(unbalanced_bs)
-        log_data_quality(run_id, 'stg_raw_sec_filings', 'balance_sheet_check',
-                         'FAILED' if unbalanced_count > 0 else 'PASSED',
-                         unbalanced_count, f"Found {unbalanced_count} unbalanced Balance Sheets (e.g. Pfizer 2024-FY assets/liabilities check).")
-        if unbalanced_count > 0:
-            log_msg(f"WARNING: SEC quality balance_sheet_check failed: {unbalanced_count} unbalanced periods found.")
-
-        # Validation SEC-B: Gross Profit Math Check (GP = Rev - CostOfRevenue)
-        gp_mismatch = df_sec_pivot[np.abs(df_sec_pivot['GrossProfit'] - (df_sec_pivot['Revenue'] - df_sec_pivot['CostOfRevenue'])) >= 1.0]
-        gp_mismatch_count = len(gp_mismatch)
-        log_data_quality(run_id, 'stg_raw_sec_filings', 'gross_profit_check',
-                         'FAILED' if gp_mismatch_count > 0 else 'PASSED',
-                         gp_mismatch_count, f"Found {gp_mismatch_count} periods with Gross Profit math mismatch (e.g. Disney 2025-Q2).")
-        if gp_mismatch_count > 0:
-            log_msg(f"WARNING: SEC quality gross_profit_check failed: {gp_mismatch_count} mismatches found.")
-
-        # Validation SEC-C: Negative Assets check
-        neg_assets = df_sec_pivot[df_sec_pivot['TotalAssets'] < 0]
-        neg_assets_count = len(neg_assets)
-        log_data_quality(run_id, 'stg_raw_sec_filings', 'non_negative_assets_check',
-                         'FAILED' if neg_assets_count > 0 else 'PASSED',
-                         neg_assets_count, f"Found {neg_assets_count} periods with negative asset values (e.g. Cronos 2025-Q3).")
-        if neg_assets_count > 0:
-            log_msg(f"WARNING: SEC quality non_negative_assets_check failed: {neg_assets_count} negative asset rows found.")
-
-        # Validation SEC-D: Net Income Exceeds Revenue check
-        ni_exceeds_rev = df_sec_pivot[df_sec_pivot['NetIncome'] > df_sec_pivot['Revenue']]
-        ni_exceeds_count = len(ni_exceeds_rev)
-        log_data_quality(run_id, 'stg_raw_sec_filings', 'net_income_cap_check',
-                         'FAILED' if ni_exceeds_count > 0 else 'PASSED',
-                         ni_exceeds_count, f"Found {ni_exceeds_count} periods where Net Income exceeded Topline Revenue (e.g. Tilray 2024-Q1).")
-        if ni_exceeds_count > 0:
-            log_msg(f"WARNING: SEC quality net_income_cap_check failed: {ni_exceeds_count} rows found.")
-
-
         # Step 4: Staging-to-Dimensional ETL (dbt simulator)
         yield "Step 4/5: Running SQL ETL models (loading dimensions and facts)...", 0.70
         log_msg("Executing ETL Transformations (Star Schema build)...")
@@ -216,8 +164,6 @@ def run_etl_pipeline_generator(run_id=None):
                 SELECT DISTINCT date FROM stg_raw_prices
                 UNION
                 SELECT DISTINCT transaction_date FROM stg_raw_transactions
-                UNION
-                SELECT DISTINCT filing_date FROM stg_raw_sec_filings
             )
             INSERT OR IGNORE INTO dim_dates (date_string, year, quarter, month, day, is_weekend)
             SELECT 
@@ -241,93 +187,7 @@ def run_etl_pipeline_generator(run_id=None):
                 ('Balanced Retirement Portfolio', 'Low-volatility conservative retirement portfolio with traditional sectors and minor crypto allocation.', 0.07)
         """)
 
-        # E. Load dim_companies
-        cursor.execute("DELETE FROM dim_companies;")
-        companies_to_insert = []
-        for sector, companies in SEC_SECTOR_COMPANIES.items():
-            for ticker, name, cik, industry in companies:
-                companies_to_insert.append((ticker, name, sector, industry, cik))
-        cursor.executemany("""
-            INSERT OR IGNORE INTO dim_companies (ticker, name, sector, industry, cik)
-            VALUES (?, ?, ?, ?, ?)
-        """, companies_to_insert)
-        conn.commit()
-        log_msg(f"Loaded {len(companies_to_insert)} corporate profiles into dim_companies.")
-
-        # F. Load fact_company_financials (ETL Transformation with DQ rules)
-        cursor.execute("DELETE FROM fact_company_financials;")
-        conn.commit()
-
-        # Build corporate & dates lookup dicts
-        companies_map = pd.read_sql_query("SELECT company_key, ticker FROM dim_companies", conn)
-        comp_dict = dict(zip(companies_map['ticker'], companies_map['company_key']))
-
-        dates_map = pd.read_sql_query("SELECT date_key, date_string FROM dim_dates", conn)
-        dates_dict = dict(zip(dates_map['date_string'], dates_map['date_key']))
-
-        financials_to_load = []
-        for _, row in df_sec_pivot.iterrows():
-            ticker = row['ticker']
-            year = int(row['fiscal_year'])
-            quarter = row['fiscal_quarter']
-
-            # Apply hard constraints (skip fully invalid records)
-            if row['TotalAssets'] < 0:
-                log_msg(f"DQ Filter: Skipped loading {ticker} {year}-{quarter} report due to negative total assets.")
-                continue
-            if row['NetIncome'] > row['Revenue']:
-                log_msg(f"DQ Filter: Skipped loading {ticker} {year}-{quarter} report because Net Income exceeds Revenue.")
-                continue
-
-            comp_key = comp_dict.get(ticker)
-            
-            # Fetch filing date info
-            meta_row = df_sec[(df_sec['ticker'] == ticker) & (df_sec['fiscal_year'] == year) & (df_sec['fiscal_quarter'] == quarter)].iloc[0]
-            f_date = meta_row['filing_date']
-            form = meta_row['form']
-            date_key = dates_dict.get(f_date, 1)
-
-            # Standard statement metrics
-            rev = float(row['Revenue'])
-            cor = float(row['CostOfRevenue'])
-            gp = float(row['GrossProfit'])
-            rd = float(row['ResearchDevelopment'])
-            sga = float(row['SellingGeneralAdmin'])
-            ni = float(row['NetIncome'])
-            ta = float(row['TotalAssets'])
-            tl = float(row['TotalLiabilities'])
-            te = float(row['TotalEquity'])
-            ocf = float(row['OperatingCashFlow'])
-            capex = float(row['CapitalExpenditures'])
-            fcf = float(row['FreeCashFlow'])
-
-            # DQ Correction: Recalculate Gross Profit if math mismatch occurred
-            if np.abs(gp - (rev - cor)) >= 1.0:
-                log_msg(f"DQ Cleansing: Corrected Gross Profit discrepancy for {ticker} in {year}-{quarter}.")
-                gp = rev - cor
-
-            # DQ Correction: Balance Balance Sheet if Assets != Liabilities + Equity
-            if np.abs(ta - (tl + te)) >= 1.0:
-                log_msg(f"DQ Cleansing: Adjusted Equity for {ticker} in {year}-{quarter} to balance assets equation.")
-                te = ta - tl
-
-            financials_to_load.append((
-                comp_key, date_key, form, year, quarter,
-                rev, cor, gp, rd, sga, ni, ta, tl, te, ocf, capex, fcf
-            ))
-
-        cursor.executemany("""
-            INSERT INTO fact_company_financials (
-                company_key, date_key, form, fiscal_year, fiscal_quarter,
-                revenue, cost_of_revenue, gross_profit, research_development, selling_general_admin,
-                net_income, total_assets, total_liabilities, total_equity, operating_cash_flow, capex, free_cash_flow
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, financials_to_load)
-        conn.commit()
-        log_msg(f"Transformed and loaded {len(financials_to_load)} corporate financial statement periods into Fact table.")
-
-        # G. Load fact_transactions (Clean transactions with invalid/null data)
+        # E. Load fact_transactions (Clean transactions with invalid/null data)
         cursor.execute("DELETE FROM fact_transactions;")
         cursor.execute("""
             INSERT INTO fact_transactions (transaction_id, portfolio_key, asset_key, date_key, transaction_type, quantity, price, total_amount, provider_key)
@@ -349,16 +209,13 @@ def run_etl_pipeline_generator(run_id=None):
             WHERE stg.quantity > 0 AND stg.price IS NOT NULL AND stg.price > 0 -- Cleaning validation issues
         """)
 
-        # H. Load fact_daily_prices
+        # F. Load fact_daily_prices (Clean negative, null, and outlier prices)
+        # To clean outliers (like the 10x NVDA spike), we will exclude prices that are > 3x the median price
         cursor.execute("DELETE FROM fact_daily_prices;")
         
         # Step F-1: Compute medians using a CTE, filter prices in SQL
         cursor.execute("""
             WITH ticker_medians AS (
-                -- Compute median price roughly using average of middle values
-                -- In SQLite, we can get an approximate median by selecting the middle record of sorted prices
-                -- For simplicity, since we have the data generator, we will filter rows where price exceeds 3 * median.
-                -- Median for AAPL~180, NVDA~500. So we filter where NVDA > 1800, AAPL <= 0, or close_price IS NULL
                 SELECT ticker, 
                        CASE 
                            WHEN ticker = 'NVDA' THEN 550.0 

@@ -55,21 +55,6 @@ def init_database():
     );
     """)
 
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS stg_raw_sec_filings (
-        ticker TEXT,
-        company_name TEXT,
-        form TEXT,
-        fiscal_year INTEGER,
-        fiscal_quarter TEXT,
-        line_item TEXT,
-        value REAL,
-        filing_date TEXT,
-        ingested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    """)
-
-
     # ==========================================
     # 2. DIMENSION TABLES (STAR SCHEMA)
     # ==========================================
@@ -115,19 +100,6 @@ def init_database():
         type TEXT
     );
     """)
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS dim_companies (
-        company_key INTEGER PRIMARY KEY AUTOINCREMENT,
-        ticker TEXT UNIQUE,
-        name TEXT,
-        sector TEXT,
-        industry TEXT,
-        cik TEXT,
-        last_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    """)
-
 
     # ==========================================
     # 3. FACT TABLES (STAR SCHEMA)
@@ -184,33 +156,6 @@ def init_database():
         UNIQUE(portfolio_key, asset_key, date_key)
     );
     """)
-
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS fact_company_financials (
-        financial_key INTEGER PRIMARY KEY AUTOINCREMENT,
-        company_key INTEGER,
-        date_key INTEGER,
-        form TEXT,
-        fiscal_year INTEGER,
-        fiscal_quarter TEXT,
-        revenue REAL,
-        cost_of_revenue REAL,
-        gross_profit REAL,
-        research_development REAL,
-        selling_general_admin REAL,
-        net_income REAL,
-        total_assets REAL,
-        total_liabilities REAL,
-        total_equity REAL,
-        operating_cash_flow REAL,
-        capex REAL,
-        free_cash_flow REAL,
-        FOREIGN KEY (company_key) REFERENCES dim_companies(company_key),
-        FOREIGN KEY (date_key) REFERENCES dim_dates(date_key),
-        UNIQUE(company_key, fiscal_year, fiscal_quarter)
-    );
-    """)
-
 
     # ==========================================
     # 4. ORCHESTRATION & METADATA TABLES
